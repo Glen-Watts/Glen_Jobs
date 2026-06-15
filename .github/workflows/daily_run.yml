@@ -1,0 +1,38 @@
+name: Daily Job Application Generator
+
+on:
+  schedule:
+    - cron: '0 8 * * 1-5' # Runs at 08:00 AM UTC, Monday through Friday
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: uv sync
+
+    - name: Run Linting
+      run: uv run ruff check .
+
+    - name: Run Tests
+      run: uv run pytest
+
+    - name: Run Job Scraper and AI Generator
+      env:
+        AI_API_KEY: ${{ secrets.AI_API_KEY }}
+        SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+        SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+        SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+        RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+      run: uv run python main.py

@@ -1,0 +1,27 @@
+[project]
+name = "glen-jobs"
+version = "0.1.0"
+description = "Automated job search engine"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-genai>=0.1.0",
+    "pytest>=9.1.0",
+    "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
+    "ruff>=0.15.17",
+    "serpapi>=1.0.2",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B"]
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
