@@ -22,7 +22,7 @@ SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL")
 
 # AI setup
-client = genai.Client(api_key=AI_API_KEY)
+client = genai.Client(api_key=AI_API_KEY) if AI_API_KEY else None
 
 # Paths
 INPUT_DIR = Path("inputs")
