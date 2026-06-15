@@ -83,6 +83,12 @@ def compile_latex(tex_path, output_name):
             if aux_file.exists():
                 aux_file.unlink()
         return True
+    except FileNotFoundError:
+        print(
+            f"pdflatex not found. Install LaTeX to compile PDFs."
+            f" On Ubuntu: sudo apt-get install texlive-latex-base"
+        )
+        return False
     except subprocess.CalledProcessError as e:
         print(f"LaTeX Compilation Error for {output_name}: {e.stderr.decode()}")
         return False
