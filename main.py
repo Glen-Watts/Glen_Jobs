@@ -274,32 +274,36 @@ def process_jobs():
 
 
 def send_email(processed_jobs):
-    if not processed_jobs:
-        print("No new jobs found. Skipping email.")
-        return
-
-    zip_name = "job_applications.zip"
-    with zipfile.ZipFile(zip_name, "w") as zipf:
-        for file in OUTPUT_DIR.glob("*.pdf"):
-            zipf.write(file, file.name)
-
     msg = EmailMessage()
-    msg["Subject"] = f"Daily Job Applications - {len(processed_jobs)} New Roles"
     msg["From"] = SENDER_EMAIL
     msg["To"] = RECEIVER_EMAIL
-    
-    body = f"Found and processed {len(processed_jobs)} new job listings.\n\n"
-    for j in processed_jobs:
-        body += f"- {j['title']} at {j['company']}\n  Link: {j['link']}\n\n"
-    body += "Tailored PDF CVs and cover letters are attached."
-    
-    msg.set_content(body)
 
-    with open(zip_name, "rb") as f:
-        file_data = f.read()
-        msg.add_attachment(
-            file_data, maintype="application", subtype="zip", filename=zip_name
-        )
+    if not processed_jobs:
+        msg["Subject"] = "Daily Job Applications - No New Roles Found"
+        msg.set_content("No new job listings were found today.")
+    else:
+        msg["Subject"] = f"Daily Job Applications - {len(processed_jobs)} New Roles"
+
+        zip_name = "job_applications.zip"
+        with zipfile.ZipFile(zip_name, "w") as zipf:
+            for file in OUTPUT_DIR.glob("*.pdf"):
+                zipf.write(file, file.name)
+
+        body = f"Found and processed {len(processed_jobs)} new job listings.\n\n"
+        for j in processed_jobs:
+            body += f"- {j['title']} at {j['company']}\n  Link: {j['link']}\n\n"
+        body += "Tailored PDF CVs and cover letters are attached."
+
+        msg.set_content(body)
+
+        with open(zip_name, "rb") as f:
+            file_data = f.read()
+            msg.add_attachment(
+                file_data,
+                maintype="application",
+                subtype="zip",
+                filename=zip_name,
+            )
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
