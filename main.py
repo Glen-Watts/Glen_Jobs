@@ -7,9 +7,9 @@ import zipfile
 from email.message import EmailMessage
 from pathlib import Path
 
-from google import genai
 import requests
 from dotenv import load_dotenv
+from google import genai
 
 # Load environment variables
 load_dotenv()
@@ -132,44 +132,51 @@ def tailor_application(job_title, company, description, base_cv):
     print(f"Tailoring application for {job_title} at {company}...")
 
     prompt = rf"""
-    You are a professional CV writer who writes in a direct, 
-    understated, and punchy British style. 
-    
+    You are a professional CV writer who writes in a direct,
+    understated, and punchy British style.
+
     TASK:
-    Tailor a CV and cover letter for the role below. 
-    Use SIMPLE, DIRECT ENGLISH. 
+    Tailor a CV and cover letter for the role below.
+    Use SIMPLE, DIRECT ENGLISH.
     Absolutely NO "AI fluff," generic superlatives, or robotic transitions.
-    
+
     JOB TITLE: {job_title}
     COMPANY: {company}
     JOB DESCRIPTION: {description}
     BASE CV: {base_cv}
-    
+
     INSTRUCTIONS:
-    1. CV CONTENT: Rewrite to match the job. Return it in RAW LATEX format 
+    1. CV CONTENT: Rewrite to match the job. Return it in RAW LATEX format
        suitable for the "(( CV_CONTENT ))" placeholder in my template.
        Include \section{{SUMMARY}}, \section{{WORK EXPERIENCE}},
        \section{{EDUCATION}}, and \section{{SKILLS}}.
        Use \begin{{itemize}} for bullets.
-    2. COVER LETTER CONTENT: Max 200-250 words. Return it in RAW LATEX format 
+    2. COVER LETTER CONTENT: Max 200-250 words. Return it in RAW LATEX format
        suitable for the "(( LETTER_CONTENT ))" placeholder in my template.
        - Paragraph 1: Direct opening and immediate value proposition.
-       - Paragraph 2: Demonstrate how your background aligns specifically with this field (e.g., bridging operational management and quantitative aptitude).
-       - Paragraph 3: Include specific research or a direct reference to the {company} or the specifics of the {job_title} role from the job description to prove this isn't a generic application.
-       - Do NOT include a greeting (e.g., "Dear Hiring Manager") or a sign-off. I have already included these.
+       - Paragraph 2: Demonstrate how your background aligns specifically
+         with this field (e.g., bridging operational management and
+         quantitative aptitude).
+       - Paragraph 3: Include specific research or a direct reference
+         to the {company} or the specifics of the {job_title} role from the
+         job description to prove this isn't a generic application.
+       - Do NOT include a greeting (e.g., "Dear Hiring Manager") or a
+         sign-off. I have already included these.
        - CRITICAL: Escape all special LaTeX characters (e.g., \&, \%).
-    
+
     CRITICAL TONE GUIDE & ANTI-FLUFF:
     - Tone: Professional, grounded, and slightly understated.
     - Style: Plain English. Short, factual sentences.
-    - FORBIDDEN WORDS: Do not use "delve", "testament", "tapestry", "seamlessly", "thrilled", "excited", "passionate", "pivotal", or "spearheaded". State facts, not emotions.
-    
+    - FORBIDDEN WORDS: Do not use "delve", "testament", "tapestry",
+      "seamlessly", "thrilled", "excited", "passionate", "pivotal", or
+      "spearheaded". State facts, not emotions.
+
     FORMAT:
     ---TAILORED CV LATEX---
     [Latex content here]
     ---COVER LETTER LATEX---
     [Latex content here]
-    
+
     Return ONLY the requested sections.
     """
 
@@ -256,7 +263,9 @@ def process_jobs():
                 compile_latex(letter_tex_path, f"{base_name}_Cover_Letter.pdf")
 
                 save_job(job_id, title, company, link)
-                processed_jobs.append({"title": title, "company": company, "link": link})
+                processed_jobs.append(
+                    {"title": title, "company": company, "link": link}
+                )
                 time.sleep(2)
             except Exception as e:
                 print(f"Error processing AI response for {title}: {e}")
