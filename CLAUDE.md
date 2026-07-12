@@ -64,8 +64,33 @@ don't run it casually.
 
 ## Working on this repo
 
-- This is Glen's tool, tuned to Glen's CV and target roles (currently: Junior
-  Analyst / Data Analyst / Customer Success in Newcastle upon Tyne). Don't
-  generalize it into a multi-user product unless asked.
+- This is Glen's tool, tuned to Glen's CV and target roles. `JOB_QUERIES` /
+  `JOB_LOCATIONS` in `main.py` are matched to his actual experience (customer
+  service management, cash handling, regulatory compliance) plus realistic
+  entry-level growth paths (apprenticeships/trainee roles) — not senior
+  technical roles requiring quals he doesn't have. Don't widen these without
+  checking SerpAPI quota headroom first (`GET https://serpapi.com/account`
+  with the key — free plan is 250 searches/month, shared across every cron
+  run); each extra query × location combination is one search per run.
 - The AI prompt in `tailor_application()` enforces a specific tone (direct, no
-  corporate fluff, banned words list). Preserve that intent when editing the prompt.
+  corporate fluff, banned words list) and an honesty constraint: it must not
+  invent qualifications Glen doesn't have, and returns the literal string
+  `NOT_SUITABLE` for roles clearly beyond his experience rather than
+  fabricating a fit. `build_application_pdfs()` treats that as "skip, don't
+  email" — preserve that behavior when editing the pipeline.
+- A job is only marked processed (deduped in `jobs.db`, included in the
+  email) once both PDFs actually compile — don't reintroduce marking a job
+  "done" on partial failure, or Glen ends up with an email entry with no
+  attached CV that never retries.
+- Location strings in `JOB_LOCATIONS` must stay disambiguated (e.g.
+  `"Durham, England"`, not bare `"Durham"`) and `search_jobs()` must keep
+  passing `gl="uk"` / `google_domain="google.co.uk"`. Without this, Google
+  Jobs happily returns Durham, North Carolina / other US results — confirmed
+  live (Harris Teeter, Public Storage, a Domino's on a real NC street address
+  all showed up under a bare "Durham" query before this fix).
+- Gemini's free tier caps `gemini-2.5-flash` at **20 requests/day total**
+  (hit live while testing with a wiped `jobs.db`, which made ~39 jobs "new"
+  at once). A normal day's *actually new* job count should stay well under
+  that, but if it's ever exceeded, `build_application_pdfs()` correctly
+  leaves the unprocessed jobs unmarked so they retry on the next run — don't
+  "fix" that by force-marking them done.

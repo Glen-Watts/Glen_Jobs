@@ -10,8 +10,8 @@ Automated pipeline that scrapes daily job postings, tailors a base CV using AI, 
 
 ## Setup
 1. Clone the repo.
-2. Install dependencies: `pip install -r requirements.txt`.
+2. Install dependencies: `uv sync`.
 3. Set up `.env` with your API keys.
-4. Run `python main.py`.
+4. Run `uv run python main.py`.
 
 See `roadmap.md` for the full development plan.

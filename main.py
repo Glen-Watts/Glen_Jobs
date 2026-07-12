@@ -1,4 +1,5 @@
 import os
+import re
 import smtplib
 import sqlite3
 import subprocess
@@ -29,6 +30,23 @@ INPUT_DIR = Path("inputs")
 OUTPUT_DIR = Path("outputs")
 BASE_CV_PATH = INPUT_DIR / "base_cv.txt"
 DB_PATH = Path("jobs.db")
+
+# Search targeting: matched to Glen's actual experience (customer service
+# management, cash handling, regulatory compliance) plus realistic entry-level
+# growth paths (apprenticeships/trainee roles), not senior technical roles he
+# has no qualifications for. Kept small to stay within the SerpAPI free-tier
+# monthly search quota (250/month, shared across every run this cron makes).
+JOB_QUERIES = [
+    "Customer Service Manager",
+    "Assistant Manager",
+    "Compliance Officer",
+    "Data Analyst Apprentice",
+]
+JOB_LOCATIONS = [
+    "Durham, England",
+    "Newcastle upon Tyne, England",
+]
+DATE_POSTED_CHIP = "date_posted:week"
 
 
 def init_db():
@@ -90,29 +108,33 @@ def compile_latex(tex_path, output_name):
         )
         return False
     except subprocess.CalledProcessError as e:
-        print(f"LaTeX Compilation Error for {output_name}: {e.stderr.decode()}")
+        # pdflatex reports errors on stdout and in the .log file, not stderr,
+        # so e.stderr is normally empty — fall back to those for a useful message.
+        detail = e.stdout.decode(errors="replace").strip() or e.stderr.decode(
+            errors="replace"
+        ).strip()
+        log_file = OUTPUT_DIR / (tex_path.stem + ".log")
+        if not detail and log_file.exists():
+            detail = log_file.read_text(errors="replace")
+        print(f"LaTeX Compilation Error for {output_name}:\n{detail[-1500:]}")
         return False
 
 
 def search_jobs():
     print("Searching for jobs...")
-    queries = [
-        "Junior Analyst",
-        "Data Analyst",
-        "Customer Success",
-    ]
-    locations = [
-        "Newcastle upon Tyne",
-    ]
     all_jobs = []
 
-    for query in queries:
-        for location in locations:
+    for query in JOB_QUERIES:
+        for location in JOB_LOCATIONS:
             params = {
                 "engine": "google_jobs",
                 "q": f"{query} in {location}",
+                "location": location,
+                "google_domain": "google.co.uk",
+                "gl": "uk",
+                "hl": "en",
                 "api_key": SERPAPI_KEY,
-                "chips": "date_posted:today",
+                "chips": DATE_POSTED_CHIP,
             }
             try:
                 response = requests.get("https://serpapi.com/search", params=params)
@@ -160,14 +182,18 @@ def tailor_application(job_title, company, description, base_cv):
     2. COVER LETTER CONTENT: Max 200-250 words. Return it in RAW LATEX format
        suitable for the "(( LETTER_CONTENT ))" placeholder in my template.
        - Paragraph 1: Direct opening and immediate value proposition.
-       - Paragraph 2: Demonstrate how your background aligns specifically
-         with this field (e.g., bridging operational management and
-         quantitative aptitude).
-       - Paragraph 3: Include specific research or a direct reference
-         to the {company} or the specifics of the {job_title} role from the
-         job description to prove this isn't a generic application.
+       - Paragraph 2: Connect his actual background (customer service
+         management, cash handling, regulatory compliance) to what this
+         specific role actually needs. Do not invent a connection that
+         isn't there.
+       - Paragraph 3: Include a direct reference to {company} or the
+         specifics of the {job_title} role from the job description to
+         prove this isn't a generic application.
        - Do NOT include a greeting (e.g., "Dear Hiring Manager") or a
          sign-off. I have already included these.
+       - Do NOT mention any person's name found in the job description
+         (recruiter, hiring manager, other candidate, etc). Only refer to
+         {company} and the role itself.
        - CRITICAL: Escape all special LaTeX characters (e.g., \&, \%).
 
     CRITICAL TONE GUIDE & ANTI-FLUFF:
@@ -176,6 +202,19 @@ def tailor_application(job_title, company, description, base_cv):
     - FORBIDDEN WORDS: Do not use "delve", "testament", "tapestry",
       "seamlessly", "thrilled", "excited", "passionate", "pivotal", or
       "spearheaded". State facts, not emotions.
+
+    HONESTY (CRITICAL — DO NOT VIOLATE):
+    - Only use skills, qualifications, and experience present in BASE CV.
+      Never invent degrees, certifications, years of experience, or
+      technical skills he doesn't have.
+    - If this role is clearly entry-level/apprenticeship/trainee, write as
+      a candidate seeking to start that path, not as someone who already
+      has the specialist experience.
+    - If this role requires qualifications far beyond BASE CV (e.g. a
+      completed relevant degree, a professional certification, or several
+      years of specialist technical experience he does not have), do not
+      paper over the gap with vague language. Instead, return exactly the
+      text NOT_SUITABLE as the entire response, with nothing else.
 
     FORMAT:
     ---TAILORED CV LATEX---
@@ -197,84 +236,106 @@ def tailor_application(job_title, company, description, base_cv):
         return None
 
 
+def sanitize_filename(text: str, max_length: int = 60) -> str:
+    text = re.sub(r"[^A-Za-z0-9 _-]", "", text)
+    text = re.sub(r"\s+", "_", text.strip())
+    return text[:max_length] or "untitled"
+
+
+def build_application_pdfs(job, base_cv, cv_template, letter_template):
+    """Generate and compile the CV/cover-letter PDFs for one job.
+
+    Returns True only if both PDFs compiled successfully — a job is only
+    considered "done" (deduped, emailed) once real attachments exist for it.
+    """
+    title = job["title"]
+    company = job["company"]
+    description = job["description"]
+
+    raw_response = tailor_application(title, company, description, base_cv)
+    if not raw_response:
+        return False
+    if raw_response.strip() == "NOT_SUITABLE":
+        print(f"Skipping unsuitable role: {title} at {company}")
+        return False
+
+    try:
+        cv_latex = (
+            raw_response.split("---TAILORED CV LATEX---")[1]
+            .split("---COVER LETTER LATEX---")[0]
+            .strip()
+        )
+        letter_latex = raw_response.split("---COVER LETTER LATEX---")[1].strip()
+    except IndexError:
+        print(f"Could not parse AI response for {title} at {company}")
+        return False
+
+    cv_latex = cv_latex.replace("```latex", "").replace("```", "").strip()
+    letter_latex = letter_latex.replace("```latex", "").replace("```", "").strip()
+
+    base_name = f"{sanitize_filename(company)}_{sanitize_filename(title)}"
+
+    cv_full = cv_template.replace("(( CV_CONTENT ))", cv_latex)
+    cv_tex_path = OUTPUT_DIR / f"{base_name}_CV.tex"
+    cv_tex_path.write_text(cv_full)
+    cv_ok = compile_latex(cv_tex_path, f"{base_name}_CV.pdf")
+
+    letter_full = letter_template.replace("(( LETTER_CONTENT ))", letter_latex)
+    letter_tex_path = OUTPUT_DIR / f"{base_name}_Cover_Letter.tex"
+    letter_tex_path.write_text(letter_full)
+    letter_ok = compile_latex(letter_tex_path, f"{base_name}_Cover_Letter.pdf")
+
+    if not (cv_ok and letter_ok):
+        print(f"PDF compilation failed for {title} at {company}, will retry next run")
+        return False
+
+    return True
+
+
 def process_jobs():
     if not OUTPUT_DIR.exists():
         OUTPUT_DIR.mkdir()
 
     if not BASE_CV_PATH.exists():
         print("Base CV not found. Please create inputs/base_cv.txt")
-        return
+        return []
 
-    with open(BASE_CV_PATH) as f:
-        base_cv = f.read()
+    base_cv = BASE_CV_PATH.read_text()
 
-    # Load templates
     cv_template_path = Path("cv/cv_template.tex")
     letter_template_path = Path("cv/letter_template.tex")
-
     if not cv_template_path.exists() or not letter_template_path.exists():
         print("LaTeX templates not found in cv/ directory.")
-        return
+        return []
 
-    with open(cv_template_path) as f:
-        cv_template = f.read()
-    with open(letter_template_path) as f:
-        letter_template = f.read()
+    cv_template = cv_template_path.read_text()
+    letter_template = letter_template_path.read_text()
 
     jobs = search_jobs()
     processed_jobs = []
 
-    for job in jobs:
-        job_id = job.get("job_id")
-        title = job.get("title")
-        company = job.get("company_name")
-        link = job.get("related_links", [{}])[0].get("link", "No link")
-        description = job.get("description", "")
-
+    for raw_job in jobs:
+        job_id = raw_job.get("job_id")
         if not job_id or job_exists(job_id):
             continue
 
-        raw_response = tailor_application(title, company, description, base_cv)
-        if raw_response:
-            try:
-                cv_latex = (
-                    raw_response.split("---TAILORED CV LATEX---")[1]
-                    .split("---COVER LETTER LATEX---")[0]
-                    .strip()
-                )
-                letter_latex = raw_response.split("---COVER LETTER LATEX---")[1].strip()
+        job = {
+            "title": raw_job.get("title"),
+            "company": raw_job.get("company_name"),
+            "link": raw_job.get("related_links", [{}])[0].get("link", "No link"),
+            "description": raw_job.get("description", ""),
+        }
 
-                # Sanitize LaTeX
-                cv_latex = cv_latex.replace("```latex", "").replace("```", "").strip()
-                letter_latex = (
-                    letter_latex.replace("```latex", "").replace("```", "").strip()
-                )
+        try:
+            success = build_application_pdfs(job, base_cv, cv_template, letter_template)
+        except Exception as e:
+            print(f"Error processing {job['title']} at {job['company']}: {e}")
+            continue
 
-                base_name = f"{company.replace(' ', '_')}_{title.replace(' ', '_')}"
-
-                # Generate CV
-                cv_full = cv_template.replace("(( CV_CONTENT ))", cv_latex)
-                cv_tex_path = OUTPUT_DIR / f"{base_name}_CV.tex"
-                with open(cv_tex_path, "w") as f:
-                    f.write(cv_full)
-                compile_latex(cv_tex_path, f"{base_name}_CV.pdf")
-
-                # Generate Letter
-                letter_full = letter_template.replace(
-                    "(( LETTER_CONTENT ))", letter_latex
-                )
-                letter_tex_path = OUTPUT_DIR / f"{base_name}_Cover_Letter.tex"
-                with open(letter_tex_path, "w") as f:
-                    f.write(letter_full)
-                compile_latex(letter_tex_path, f"{base_name}_Cover_Letter.pdf")
-
-                save_job(job_id, title, company, link)
-                processed_jobs.append(
-                    {"title": title, "company": company, "link": link}
-                )
-                time.sleep(2)
-            except Exception as e:
-                print(f"Error processing AI response for {title}: {e}")
+        if success:
+            save_job(job_id, job["title"], job["company"], job["link"])
+            processed_jobs.append(job)
+        time.sleep(2)
 
     return processed_jobs
 
