@@ -49,6 +49,12 @@ uv run python main.py    # full pipeline run — needs .env populated and pdflat
 `main.py` locally with real keys will hit paid APIs and send a real email to Glen —
 don't run it casually.
 
+Optional env var `CRITIC_PASS` (`1`/`true`/`yes`) enables a second Gemini call per
+successfully-tailored job that reviews the draft as a skeptical recruiter would and
+tightens it further — see "Working on this repo" below. Off by default; not set as
+a repo secret, since it doubles Gemini usage and the free tier can't absorb that
+by default.
+
 ## Key files
 
 - `main.py` — the entire pipeline (search → tailor → compile → email). Single file by
@@ -94,3 +100,34 @@ don't run it casually.
   that, but if it's ever exceeded, `build_application_pdfs()` correctly
   leaves the unprocessed jobs unmarked so they retry on the next run — don't
   "fix" that by force-marking them done.
+- `jobs.db` has a `status` column (`processed` / `unsuitable`; `failed`
+  outcomes are never persisted, so they retry). `init_db()` migrates old
+  4-column databases in place (`ALTER TABLE ... ADD COLUMN` guarded by a
+  `PRAGMA table_info` check) — **never remove this migration** while any
+  pre-migration `jobs.db` might still exist on the Actions runner; removing
+  it reintroduces an `OperationalError` that broke the pipeline outright
+  when this was first tested against the live database's actual schema.
+  `job_exists()` intentionally matches any status — both `processed` and
+  `unsuitable` jobs must never be re-sent to Gemini, since `unsuitable`
+  jobs stay in SerpAPI's `date_posted:week` search window for days and
+  would otherwise burn the 20/day quota re-rejecting the same job.
+- The CV is checked for page overflow after compiling (`get_pdf_page_count()`
+  via `pdfinfo`, from the `poppler-utils` apt package — explicitly listed in
+  the workflow install step, don't assume it's transitively present). If it
+  runs to 2+ pages, `build_application_pdfs()` retries **once** with a
+  compress instruction, then ships as-is if still too long — never turn
+  this into an unbounded retry loop; losing an application to a formatting
+  nit is worse than an occasional 2-page CV.
+- `send_email()` is a review queue, not an autosend: subject and body
+  explicitly tell Glen these are AI drafts he must read before applying,
+  and each job's actual drafted cover letter text (de-LaTeX'd via
+  `delatex_for_display()`) is shown inline so he can judge fit without
+  unzipping PDFs. Don't reframe this back into "applications sent" language
+  — Glen sending an unreviewed AI letter is the main reputational risk in
+  this whole system.
+- `inputs/base_cv.txt` currently has no quantified achievements (cash
+  volumes, team sizes, named recognitions) — see `todo.md` Phase 0/1. The
+  honesty guard in the prompt is deliberate and correct; the fix is better
+  *true* input from Glen, never looser generation rules. Don't weaken the
+  NOT_SUITABLE gate, the no-invented-qualifications rule, or the
+  no-names-from-job-descriptions rule to compensate for thin input data.
